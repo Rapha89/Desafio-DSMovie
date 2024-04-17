@@ -3,8 +3,10 @@ package com.devsuperior.dsmovie.services;
 import com.devsuperior.dsmovie.dto.MovieDTO;
 import com.devsuperior.dsmovie.entities.MovieEntity;
 import com.devsuperior.dsmovie.repositories.MovieRepository;
+import com.devsuperior.dsmovie.services.exceptions.DatabaseException;
 import com.devsuperior.dsmovie.services.exceptions.ResourceNotFoundException;
 import com.devsuperior.dsmovie.tests.MovieFactory;
+import jakarta.persistence.EntityNotFoundException;
 import org.aspectj.lang.annotation.Before;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
@@ -13,6 +15,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.Mockito;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
@@ -32,10 +35,10 @@ public class MovieServiceTests {
 	@Mock
 	private MovieRepository repository;
 
-	private Long existingMovieId, nonExistingMovieId;
+	private Long existingMovieId, nonExistingMovieId, dependentExistingId;
 	private MovieEntity movieEntity;
+	private MovieDTO movieDTO;
 	private PageImpl<MovieEntity> page;
-
 
 
 	@BeforeEach
@@ -43,14 +46,30 @@ public class MovieServiceTests {
 
 		existingMovieId = 1L;
 		nonExistingMovieId = 2L;
+		dependentExistingId = 3L;
 
 		movieEntity = MovieFactory.createMovieEntity();
+		movieDTO = new MovieDTO(movieEntity);
 		page = new PageImpl<>(List.of(movieEntity));
 
 		Mockito.when(repository.findById(existingMovieId)).thenReturn(Optional.of(movieEntity));
 		Mockito.when(repository.findById(nonExistingMovieId)).thenReturn(Optional.empty());
 
 		Mockito.when(repository.searchByTitle(any(), (Pageable) any())).thenReturn(page);
+
+		Mockito.when(repository.save(any())).thenReturn(movieEntity);
+
+		Mockito.when(repository.getReferenceById(existingMovieId)).thenReturn(movieEntity);
+		Mockito.doThrow(EntityNotFoundException.class).when(repository).getReferenceById(nonExistingMovieId);
+
+		Mockito.when(repository.existsById(existingMovieId)).thenReturn(true);
+		Mockito.when(repository.existsById(nonExistingMovieId)).thenReturn(false);
+		Mockito.when(repository.existsById(dependentExistingId)).thenReturn(true);
+
+		Mockito.doNothing().when(repository).deleteById(existingMovieId);
+		Mockito.doThrow(DataIntegrityViolationException.class).when(repository).deleteById(dependentExistingId);
+
+
 	}
 
 
@@ -91,25 +110,63 @@ public class MovieServiceTests {
 	
 	@Test
 	public void insertShouldReturnMovieDTO() {
+
+		MovieDTO result = service.insert(movieDTO);
+
+		Assertions.assertNotNull(result);
+		Assertions.assertEquals(result.getId(), movieEntity.getId());
+		Assertions.assertEquals(result.getTitle(), movieEntity.getTitle());
+		Assertions.assertEquals(result.getScore(), movieEntity.getScore());
+
 	}
 	
 	@Test
 	public void updateShouldReturnMovieDTOWhenIdExists() {
+
+		MovieDTO result = service.update(existingMovieId, movieDTO);
+
+		Assertions.assertNotNull(result);
+		Assertions.assertEquals(result.getId(), movieEntity.getId());
+		Assertions.assertEquals(result.getTitle(), movieEntity.getTitle());
+		Assertions.assertEquals(result.getScore(), movieEntity.getScore());
+
 	}
 	
 	@Test
 	public void updateShouldThrowResourceNotFoundExceptionWhenIdDoesNotExist() {
+
+		Assertions.assertThrows(ResourceNotFoundException.class, () -> {
+			service.update(nonExistingMovieId, movieDTO);
+		});
+
 	}
 	
 	@Test
 	public void deleteShouldDoNothingWhenIdExists() {
+
+		Assertions.assertDoesNotThrow(() -> {
+			service.delete(existingMovieId);
+		});
+
 	}
 	
 	@Test
 	public void deleteShouldThrowResourceNotFoundExceptionWhenIdDoesNotExist() {
+
+		Assertions.assertThrows(ResourceNotFoundException.class, () -> {
+			service.delete(nonExistingMovieId);
+		});
+
 	}
 	
 	@Test
 	public void deleteShouldThrowDatabaseExceptionWhenDependentId() {
+
+		Assertions.assertThrows(DatabaseException.class, () -> {
+			service.delete(dependentExistingId);
+		});
+
 	}
+
+
 }
